@@ -1,0 +1,13 @@
+{
+  "feeds": [
+    "shopify-admin://all-blogs"
+  ],
+  "publar": {
+    "start_time": "2026-06-06T00:00:00Z",
+    "interval_hours": 2,
+    "initial_count": 1,
+    "sort_order": "chronological",
+    "channel_title": "Publar Drip Feed",
+    "channel_description": "Drip feed starting with 1 blog article, releasing an additional article every 2 hours."
+  }
+}

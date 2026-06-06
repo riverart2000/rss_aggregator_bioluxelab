@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+feed.rss.tmp
+logs/
+*.priv
