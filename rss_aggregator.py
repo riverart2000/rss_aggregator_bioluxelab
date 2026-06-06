@@ -236,6 +236,12 @@ class FeedAggregator:
         self._shopify_oauth_token = ""
         self._shopify_oauth_expires_at = 0.0
 
+        # Define path for persistent publar state
+        self.state_file = ""
+        if self.feeds_file:
+            base_dir = os.path.dirname(self.feeds_file)
+            self.state_file = os.path.join(base_dir, "publar_state.json") if base_dir else "publar_state.json"
+
         self._lock = threading.Lock()
         self._cached_xml = ""
         self._latest_all_items: list[FeedItem] = []
@@ -840,6 +846,40 @@ class FeedAggregator:
                     visible_items.append(item)
 
             allowed_count = len(visible_items)
+
+            # Persistent State Enforcement:
+            # Save the computed allowed count so restarts reads this and knows exactly what number its on.
+            if self.state_file:
+                loaded_state = {}
+                if os.path.exists(self.state_file):
+                    try:
+                        with open(self.state_file, "r", encoding="utf-8") as sf:
+                            loaded_state = json.load(sf)
+                    except Exception:
+                        pass
+                
+                # Check if we should increase the count or write it initially
+                saved_allowed_count = loaded_state.get("allowed_count", 0)
+                
+                # If we computed more visible items, update the file state.
+                # If the script computes a lower number (due to an absolute clock drift or pool refresh delay),
+                # we preserve the higher saved_allowed_count to guarantee we NEVER roll back count on restarts!
+                if allowed_count > saved_allowed_count:
+                    state_payload = {
+                        "allowed_count": allowed_count,
+                        "last_updated": now_utc.isoformat(),
+                        "start_time": start_time_str
+                    }
+                    try:
+                        with open(self.state_file, "w", encoding="utf-8") as sf:
+                            json.dump(state_payload, sf, indent=2)
+                    except Exception as exc:
+                        logger.warning("Failed to write to state file %s: %s", self.state_file, exc)
+                elif saved_allowed_count > allowed_count:
+                    # Enforce the persistent fallback limit:
+                    allowed_count = saved_allowed_count
+                    visible_items = pool[:allowed_count]
+
             rss_items = sorted(
                 visible_items,
                 key=lambda x: x.published or datetime.fromtimestamp(0, tz=timezone.utc),
