@@ -28,7 +28,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.utils import format_datetime, parsedate_to_datetime
 from logging.handlers import RotatingFileHandler
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -832,7 +832,7 @@ class FeedAggregator:
                 else:
                     # Subsequent items are unlocked after a random 3-5 hours interval
                     random_interval_hours = prng.uniform(3.0, 5.0)
-                    current_release_time = current_release_time + datetime.timedelta(hours=random_interval_hours)
+                    current_release_time = current_release_time + timedelta(hours=random_interval_hours)
                     release_map[item.guid or item.link or item.title] = current_release_time
 
             now_utc = datetime.now(timezone.utc)
