@@ -16,6 +16,8 @@ SERVICE_NAME="${RSS_AGG_SERVICE_NAME:-rss-aggregator}"
 RSS_PORT="${RSS_AGG_PORT:-18090}"
 RSS_MAX_ITEMS="${RSS_AGG_MAX_ITEMS:-1000}"
 CHANNEL_LINK="${RSS_AGG_CHANNEL_LINK:-https://revenuemindproai.com/}"
+GITHUB_REPO_URL="${RSS_AGG_GITHUB_REPO:-https://github.com/riverart2000/rss_aggregator_bioluxelab.git}"
+GITHUB_BRANCH="${RSS_AGG_GITHUB_BRANCH:-main}"
 RSS_LOG_DIR="${RSS_AGG_REMOTE_LOG_DIR:-$REMOTE_APP_DIR/logs}"
 RSS_LOG_FILE="${RSS_AGG_LOG_FILE:-$RSS_LOG_DIR/rss_aggregator.log}"
 RSS_LOG_LEVEL="${RSS_AGG_LOG_LEVEL:-INFO}"
@@ -124,10 +126,25 @@ echo "[2/7] Preparing remote app directory $REMOTE_APP_DIR..."
 ssh_remote "mkdir -p '$REMOTE_APP_DIR' '$RSS_LOG_DIR'"
 ssh_remote "touch '$RSS_LOG_FILE' && chmod 664 '$RSS_LOG_FILE'"
 
-echo "[3/7] Uploading aggregator files..."
-scp_remote "$LOCAL_SCRIPT" "$REMOTE_APP_DIR/rss_aggregator.py"
-scp_remote "$LOCAL_FEEDS" "$REMOTE_APP_DIR/rss_feeds.json"
-ssh_remote "chmod 644 '$REMOTE_APP_DIR/rss_aggregator.py' '$REMOTE_APP_DIR/rss_feeds.json'"
+echo "[3/7] Syncing files from GitHub repository..."
+ssh_remote "
+  if [ ! -d \"$REMOTE_APP_DIR/.git\" ]; then
+    echo \"Initializing Git repository in $REMOTE_APP_DIR...\"
+    mkdir -p \"$REMOTE_APP_DIR\"
+    cd \"$REMOTE_APP_DIR\"
+    git init
+    git remote add origin \"$GITHUB_REPO_URL\"
+    git fetch origin
+    git checkout -f -B \"$GITHUB_BRANCH\" \"origin/$GITHUB_BRANCH\"
+  else
+    echo \"Updating repository from GitHub...\"
+    cd \"$REMOTE_APP_DIR\"
+    git remote set-url origin \"$GITHUB_REPO_URL\" || true
+    git fetch origin
+    git reset --hard origin/\"$GITHUB_BRANCH\"
+  fi
+  chmod 644 \"$REMOTE_APP_DIR/rss_aggregator.py\" \"$REMOTE_APP_DIR/rss_feeds.json\"
+"
 
 echo "[4/7] Installing/refreshing systemd service $SERVICE_NAME..."
 ssh_remote "sudo tee /etc/systemd/system/$SERVICE_NAME.service >/dev/null" <<EOF
