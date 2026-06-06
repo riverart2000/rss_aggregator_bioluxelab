@@ -65,23 +65,29 @@ The config file defines your feed sources and drip-feed schedules. Example:
     "shopify-admin://all-blogs"
   ],
   "publar": {
-    "start_time": "2026-06-06T00:00:00Z",
-    "interval_hours": 2,
+    "start_time": "2026-06-06T16:00:00Z",
+    "min_interval_hours": 3.0,
+    "max_interval_hours": 5.0,
     "initial_count": 1,
     "sort_order": "chronological",
     "channel_title": "Publar Drip Feed",
-    "channel_description": "Drip feed starting with 1 blog article, releasing an additional article every 2 hours."
+    "channel_description": "Drip feed starting with 1 blog article, releasing additional articles randomly every 3 to 5 hours."
   }
 }
 ```
 
 Drip-feed Options:
-- `start_time`: Reference ISO-8601 timestamp. The scheduling is deterministic and won't reset on server restarts.
-- `interval_hours`: Number of hours between releasing each additional blog article.
+- `start_time`: Reference ISO-8601 timestamp. The scheduling is deterministic, and state is preserved on restart using `publar_state.json`.
+- `min_interval_hours`: Minimum randomized hours before releasing each additional blog article.
+- `max_interval_hours`: Maximum randomized hours before releasing each additional blog article.
 - `initial_count`: Number of blog articles to show right from the start time.
 - `sort_order`: Order of article release from the pool. Supports `"chronological"` (oldest first) or `"reverse-chronological"` (newest first).
 - `channel_title`: Custom feed title for the `/publar/rss` endpoint.
 - `channel_description`: Custom feed description.
+
+## Persistence State
+
+The application persists sequence progression in `publar_state.json`, which tracks the count floor across application restarts, protecting deterministic pacing from timing rollback or clock drifts.
 
 ## Notes
 
