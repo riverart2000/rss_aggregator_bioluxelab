@@ -800,6 +800,9 @@ class FeedAggregator:
             publar_title = publar.get("channel_title", "Publar Drip Feed")
             publar_desc = publar.get("channel_description", "Drip-released articles randomly between 3-5 hours.")
 
+            min_interval = float(publar.get("min_interval_hours", 3.0))
+            max_interval = float(publar.get("max_interval_hours", 5.0))
+
             pool = list(self._latest_all_items)
             is_reverse = (sort_order == "reverse-chronological")
             pool.sort(
@@ -830,8 +833,8 @@ class FeedAggregator:
                     # Initial items are immediately unlocked at start_time
                     release_map[item.guid or item.link or item.title] = start_dt
                 else:
-                    # Subsequent items are unlocked after a random 3-5 hours interval
-                    random_interval_hours = prng.uniform(3.0, 5.0)
+                    # Subsequent items are unlocked after a random interval
+                    random_interval_hours = prng.uniform(min_interval, max_interval)
                     current_release_time = current_release_time + timedelta(hours=random_interval_hours)
                     release_map[item.guid or item.link or item.title] = current_release_time
 
@@ -944,6 +947,9 @@ class FeedAggregator:
                 start_dt = parse_datetime(start_time_str) or datetime.fromtimestamp(0, tz=timezone.utc)
                 initial_count = int(self.publar_config.get("initial_count", 1))
                 now_utc = datetime.now(timezone.utc)
+
+                min_interval = float(self.publar_config.get("min_interval_hours", 3.0))
+                max_interval = float(self.publar_config.get("max_interval_hours", 5.0))
                 
                 # Check how many are currently allowed with the deterministic random schedule
                 chron_pool = list(self._latest_all_items)
@@ -960,7 +966,7 @@ class FeedAggregator:
                     if index < initial_count:
                         item_release_time = start_dt
                     else:
-                        random_interval_hours = prng.uniform(3.0, 5.0)
+                        random_interval_hours = prng.uniform(min_interval, max_interval)
                         current_release_time = current_release_time + timedelta(hours=random_interval_hours)
                         item_release_time = current_release_time
                     
@@ -971,7 +977,7 @@ class FeedAggregator:
                     "publar_enabled": True,
                     "publar_start_time": start_time_str,
                     "publar_initial_count": initial_count,
-                    "publar_random_drip": "3.0 to 5.0 hours",
+                    "publar_random_drip": f"{min_interval} to {max_interval} hours",
                     "publar_allowed_count": allowed_count,
                     "publar_pooled_count": len(self._latest_all_items),
                 }

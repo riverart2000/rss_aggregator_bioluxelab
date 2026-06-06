@@ -4,10 +4,11 @@
   ],
   "publar": {
     "start_time": "2026-06-06T16:00:00Z",
-    "interval_hours": 2,
+    "min_interval_hours": 3.0,
+    "max_interval_hours": 5.0,
     "initial_count": 1,
     "sort_order": "chronological",
     "channel_title": "Publar Drip Feed",
-    "channel_description": "Drip feed starting with 1 blog article, releasing an additional article every 2 hours."
+    "channel_description": "Drip feed starting with 1 blog article, releasing additional articles randomly every 3 to 5 hours."
   }
 }
