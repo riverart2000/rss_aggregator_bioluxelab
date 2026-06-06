@@ -846,6 +846,7 @@ class FeedAggregator:
                     visible_items.append(item)
 
             allowed_count = len(visible_items)
+            elapsed_seconds = max(0.0, (now_utc - start_dt).total_seconds())
 
             # Persistent State Enforcement:
             # Save the computed allowed count so restarts reads this and knows exactly what number its on.
@@ -951,7 +952,6 @@ class FeedAggregator:
                     reverse=False,
                 )
                 
-                import datetime as dt_mod
                 prng = random.Random(42)
                 allowed_count = 0
                 current_release_time = start_dt
@@ -961,7 +961,7 @@ class FeedAggregator:
                         item_release_time = start_dt
                     else:
                         random_interval_hours = prng.uniform(3.0, 5.0)
-                        current_release_time = current_release_time + dt_mod.timedelta(hours=random_interval_hours)
+                        current_release_time = current_release_time + timedelta(hours=random_interval_hours)
                         item_release_time = current_release_time
                     
                     if now_utc >= item_release_time:
