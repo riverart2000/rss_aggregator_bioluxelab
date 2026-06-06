@@ -24,6 +24,7 @@ import html
 import json
 import logging
 import os
+import random
 import threading
 import time
 from dataclasses import dataclass
@@ -787,12 +788,11 @@ class FeedAggregator:
             start_time_str = publar.get("start_time", "2026-06-06T00:00:00Z")
             start_dt = parse_datetime(start_time_str) or datetime.fromtimestamp(0, tz=timezone.utc)
             
-            interval_hours = float(publar.get("interval_hours", 2.0))
             initial_count = int(publar.get("initial_count", 1))
             sort_order = str(publar.get("sort_order", "chronological")).strip().lower()
             
             publar_title = publar.get("channel_title", "Publar Drip Feed")
-            publar_desc = publar.get("channel_description", "Drip-released articles every 2 hours.")
+            publar_desc = publar.get("channel_description", "Drip-released articles randomly between 3-5 hours.")
 
             pool = list(self._latest_all_items)
             is_reverse = (sort_order == "reverse-chronological")
@@ -801,22 +801,45 @@ class FeedAggregator:
                 reverse=is_reverse,
             )
 
-            now_utc = datetime.now(timezone.utc)
-            elapsed_seconds = (now_utc - start_dt).total_seconds()
+            # Assign each article a deterministic pseudo-random release time!
+            # Seed the PRNG with a stable value so restarts or new requests yield the exact same times.
+            # Using the chronological pool items lets the timing sequence remain completely stable
+            # even as new articles are appended to the reservoir feed.
+            prng = random.Random(42)  # Seed is fixed to 42 for absolute consistency
             
-            if elapsed_seconds < 0:
-                allowed_count = initial_count
-            else:
-                interval_seconds = interval_hours * 3600.0
-                if interval_seconds <= 0:
-                    allowed_count = len(pool)
+            # chron_pool is chronological (oldest first) so that new articles added over time are appended to the end,
+            # ensuring that already assigned intervals of older articles never change!
+            chron_pool = list(self._latest_all_items)
+            chron_pool.sort(
+                key=lambda x: x.published or datetime.fromtimestamp(0, tz=timezone.utc),
+                reverse=False,
+            )
+            
+            # Map item to its computed allowed UTC release timestamp
+            release_map = {}
+            current_release_time = start_dt
+            
+            for index, item in enumerate(chron_pool):
+                if index < initial_count:
+                    # Initial items are immediately unlocked at start_time
+                    release_map[item.guid or item.link or item.title] = start_dt
                 else:
-                    extra_items = int(elapsed_seconds // interval_seconds)
-                    allowed_count = initial_count + extra_items
+                    # Subsequent items are unlocked after a random 3-5 hours interval
+                    random_interval_hours = prng.uniform(3.0, 5.0)
+                    current_release_time = current_release_time + datetime.timedelta(hours=random_interval_hours)
+                    release_map[item.guid or item.link or item.title] = current_release_time
 
-            allowed_count = max(0, allowed_count)
-            visible_items = pool[:allowed_count]
+            now_utc = datetime.now(timezone.utc)
+            
+            # Filter the user-requested pool order based on calculated release times
+            visible_items = []
+            for item in pool:
+                key_id = item.guid or item.link or item.title
+                item_release_time = release_map.get(key_id, start_dt)
+                if now_utc >= item_release_time:
+                    visible_items.append(item)
 
+            allowed_count = len(visible_items)
             rss_items = sorted(
                 visible_items,
                 key=lambda x: x.published or datetime.fromtimestamp(0, tz=timezone.utc),
@@ -878,26 +901,38 @@ class FeedAggregator:
             if self.publar_config:
                 start_time_str = self.publar_config.get("start_time", "2026-06-06T00:00:00Z")
                 start_dt = parse_datetime(start_time_str) or datetime.fromtimestamp(0, tz=timezone.utc)
-                interval_hours = float(self.publar_config.get("interval_hours", 2.0))
                 initial_count = int(self.publar_config.get("initial_count", 1))
                 now_utc = datetime.now(timezone.utc)
-                elapsed_seconds = (now_utc - start_dt).total_seconds()
                 
-                if elapsed_seconds < 0:
-                    allowed_count = initial_count
-                else:
-                    interval_seconds = interval_hours * 3600.0
-                    if interval_seconds <= 0:
-                        allowed_count = len(self._latest_all_items)
+                # Check how many are currently allowed with the deterministic random schedule
+                chron_pool = list(self._latest_all_items)
+                chron_pool.sort(
+                    key=lambda x: x.published or datetime.fromtimestamp(0, tz=timezone.utc),
+                    reverse=False,
+                )
+                
+                import datetime as dt_mod
+                prng = random.Random(42)
+                allowed_count = 0
+                current_release_time = start_dt
+                
+                for index, item in enumerate(chron_pool):
+                    if index < initial_count:
+                        item_release_time = start_dt
                     else:
-                        extra_items = int(elapsed_seconds // interval_seconds)
-                        allowed_count = initial_count + extra_items
+                        random_interval_hours = prng.uniform(3.0, 5.0)
+                        current_release_time = current_release_time + dt_mod.timedelta(hours=random_interval_hours)
+                        item_release_time = current_release_time
+                    
+                    if now_utc >= item_release_time:
+                        allowed_count += 1
+                
                 publar_stats = {
                     "publar_enabled": True,
                     "publar_start_time": start_time_str,
-                    "publar_interval_hours": interval_hours,
                     "publar_initial_count": initial_count,
-                    "publar_allowed_count": max(0, allowed_count),
+                    "publar_random_drip": "3.0 to 5.0 hours",
+                    "publar_allowed_count": allowed_count,
                     "publar_pooled_count": len(self._latest_all_items),
                 }
 
