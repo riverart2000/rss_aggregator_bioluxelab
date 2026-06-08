@@ -810,7 +810,18 @@ class FeedAggregator:
                 reverse=is_reverse,
             )
 
-            # Assign each article a deterministic pseudo-random release time!
+            # Separate articles into historical and newly published articles (published after start_dt).
+            # This ensures that recently published/live blog posts bypass the drip queue and are unlocked
+            # immediately, while historical posts continue to drip at the randomized interval.
+            historical_items = []
+            new_items = []
+            for item in self._latest_all_items:
+                if item.published and item.published > start_dt:
+                    new_items.append(item)
+                else:
+                    historical_items.append(item)
+
+            # Assign each historical article a deterministic pseudo-random release time!
             # Seed the PRNG with a stable value so restarts or new requests yield the exact same times.
             # Using the chronological pool items lets the timing sequence remain completely stable
             # even as new articles are appended to the reservoir feed.
@@ -818,7 +829,7 @@ class FeedAggregator:
             
             # chron_pool is chronological (oldest first) so that new articles added over time are appended to the end,
             # ensuring that already assigned intervals of older articles never change!
-            chron_pool = list(self._latest_all_items)
+            chron_pool = list(historical_items)
             chron_pool.sort(
                 key=lambda x: x.published or datetime.fromtimestamp(0, tz=timezone.utc),
                 reverse=False,
@@ -829,14 +840,20 @@ class FeedAggregator:
             current_release_time = start_dt
             
             for index, item in enumerate(chron_pool):
+                key = item.guid or item.link or item.title
                 if index < initial_count:
                     # Initial items are immediately unlocked at start_time
-                    release_map[item.guid or item.link or item.title] = start_dt
+                    release_map[key] = start_dt
                 else:
                     # Subsequent items are unlocked after a random interval
                     random_interval_hours = prng.uniform(min_interval, max_interval)
                     current_release_time = current_release_time + timedelta(hours=random_interval_hours)
-                    release_map[item.guid or item.link or item.title] = current_release_time
+                    release_map[key] = current_release_time
+
+            for item in new_items:
+                key = item.guid or item.link or item.title
+                # New items are immediately released at their published time
+                release_map[key] = item.published
 
             now_utc = datetime.now(timezone.utc)
             
@@ -903,7 +920,11 @@ class FeedAggregator:
             ]
 
             for item in rss_items:
-                pub = format_datetime(item.published) if item.published else format_datetime(now_utc)
+                # Use computed release time as the pubDate so that RSS readers/schedulers (like Publer)
+                # recognize dripped articles as brand new, and newly published posts have correct current times.
+                key_id = item.guid or item.link or item.title
+                item_release_time = release_map.get(key_id, item.published or start_dt)
+                pub = format_datetime(item_release_time)
                 desc_source = (
                     f"<p><strong>Source:</strong> "
                     f"<a href=\"{xml_escape(item.source_url)}\">{xml_escape(item.source_title)}</a></p>"
@@ -951,15 +972,24 @@ class FeedAggregator:
                 min_interval = float(self.publar_config.get("min_interval_hours", 3.0))
                 max_interval = float(self.publar_config.get("max_interval_hours", 5.0))
                 
+                # Separate articles into historical and newly published articles (published after start_dt)
+                historical_items = []
+                new_items = []
+                for item in self._latest_all_items:
+                    if item.published and item.published > start_dt:
+                        new_items.append(item)
+                    else:
+                        historical_items.append(item)
+
                 # Check how many are currently allowed with the deterministic random schedule
-                chron_pool = list(self._latest_all_items)
+                chron_pool = list(historical_items)
                 chron_pool.sort(
                     key=lambda x: x.published or datetime.fromtimestamp(0, tz=timezone.utc),
                     reverse=False,
                 )
                 
                 prng = random.Random(42)
-                allowed_count = 0
+                allowed_count = len(new_items)
                 current_release_time = start_dt
                 
                 for index, item in enumerate(chron_pool):
