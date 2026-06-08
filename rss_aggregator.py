@@ -811,8 +811,8 @@ class FeedAggregator:
             )
 
             # Separate articles into historical and newly published articles (published after start_dt).
-            # This ensures that recently published/live blog posts bypass the drip queue and are unlocked
-            # immediately, while historical posts continue to drip at the randomized interval.
+            # This ensures that recently published/live blog posts bypass the historical drip queue,
+            # but are paced deterministically among themselves to prevent posting too fast and getting banned/blocked.
             historical_items = []
             new_items = []
             for item in self._latest_all_items:
@@ -850,10 +850,24 @@ class FeedAggregator:
                     current_release_time = current_release_time + timedelta(hours=random_interval_hours)
                     release_map[key] = current_release_time
 
+            # Pacing new items deterministically relative to each other (e.g., if there's a bulk-import of new items)
+            # using max(item.published, previous_released + interval)
+            new_items.sort(
+                key=lambda x: x.published or datetime.fromtimestamp(0, tz=timezone.utc),
+                reverse=False,
+            )
+            prng_new = random.Random(100)
+            prev_new_release = None
             for item in new_items:
                 key = item.guid or item.link or item.title
-                # New items are immediately released at their published time
-                release_map[key] = item.published
+                pub_time = item.published or start_dt
+                if prev_new_release is None:
+                    release_time = pub_time
+                else:
+                    random_interval_hours = prng_new.uniform(min_interval, max_interval)
+                    release_time = max(pub_time, prev_new_release + timedelta(hours=random_interval_hours))
+                release_map[key] = release_time
+                prev_new_release = release_time
 
             now_utc = datetime.now(timezone.utc)
             
@@ -973,6 +987,8 @@ class FeedAggregator:
                 max_interval = float(self.publar_config.get("max_interval_hours", 5.0))
                 
                 # Separate articles into historical and newly published articles (published after start_dt)
+                # This ensures that recently published/live blog posts bypass the historical drip queue,
+                # but are paced deterministically among themselves to prevent posting too fast and getting banned/blocked.
                 historical_items = []
                 new_items = []
                 for item in self._latest_all_items:
@@ -988,18 +1004,42 @@ class FeedAggregator:
                     reverse=False,
                 )
                 
-                prng = random.Random(42)
-                allowed_count = len(new_items)
+                # Map item to its computed allowed UTC release timestamp to count how many are allowed right now
+                release_map = {}
                 current_release_time = start_dt
                 
+                prng = random.Random(42)
                 for index, item in enumerate(chron_pool):
+                    key = item.guid or item.link or item.title
                     if index < initial_count:
-                        item_release_time = start_dt
+                        release_map[key] = start_dt
                     else:
                         random_interval_hours = prng.uniform(min_interval, max_interval)
                         current_release_time = current_release_time + timedelta(hours=random_interval_hours)
-                        item_release_time = current_release_time
-                    
+                        release_map[key] = current_release_time
+
+                # Pacing new items deterministically relative to each other (using max(item.published, previous_released + interval))
+                new_items.sort(
+                    key=lambda x: x.published or datetime.fromtimestamp(0, tz=timezone.utc),
+                    reverse=False,
+                )
+                prng_new = random.Random(100)
+                prev_new_release = None
+                for item in new_items:
+                    key = item.guid or item.link or item.title
+                    pub_time = item.published or start_dt
+                    if prev_new_release is None:
+                        release_time = pub_time
+                    else:
+                        random_interval_hours = prng_new.uniform(min_interval, max_interval)
+                        release_time = max(pub_time, prev_new_release + timedelta(hours=random_interval_hours))
+                    release_map[key] = release_time
+                    prev_new_release = release_time
+
+                allowed_count = 0
+                for item in self._latest_all_items:
+                    key_id = item.guid or item.link or item.title
+                    item_release_time = release_map.get(key_id, start_dt)
                     if now_utc >= item_release_time:
                         allowed_count += 1
                 
